@@ -14,7 +14,7 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     # Membaca file CSV
-    df = pd.read_csv(r'D:\backup\download\house-prices-advanced-regression-techniques\air-quality-analysis\dashboard\main_data.csv')
+    df = pd.read_csv('dashboard/dashboard.py')
     
     # Tambahkan kolom waktu dan musim
     df['datetime'] = pd.to_datetime(df[['year', 'month', 'day', 'hour']])
