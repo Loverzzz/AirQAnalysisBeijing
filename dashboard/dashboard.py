@@ -3,138 +3,183 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Set page config
+# Konfigurasi halaman
 st.set_page_config(
-    page_title="Air Quality Analysis Dashboard",
+    page_title="Dashboard Analisis Kualitas Udara",
     page_icon="🌍",
     layout="wide"
 )
 
-# Load and process data
+# Fungsi memuat data
 @st.cache_data
 def load_data():
-    # Baca CSV file tanpa menggunakan index
-    df = pd.read_csv('main_data.csv')
+    # Membaca file CSV
+    df = pd.read_csv(r'D:\backup\download\house-prices-advanced-regression-techniques\air-quality-analysis\dashboard\main_data.csv')
     
-    # Convert to datetime
+    # Tambahkan kolom waktu dan musim
     df['datetime'] = pd.to_datetime(df[['year', 'month', 'day', 'hour']])
-    
-    # Add season column
     df['month'] = df['datetime'].dt.month
-    df['season'] = pd.cut(df['month'],
-                         bins=[0, 3, 6, 9, 12],
-                         labels=['Winter', 'Spring', 'Summer', 'Fall'],
-                         include_lowest=True)
+    df['month_name'] = df['datetime'].dt.strftime('%B')  # Nama bulan (Januari, Februari, ...)
+    
+    # Tentukan musim berdasarkan bulan
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'Winter'
+        elif month in [3, 4, 5]:
+            return 'Spring'
+        elif month in [6, 7, 8]:
+            return 'Summer'
+        elif month in [9, 10, 11]:
+            return 'Fall'
+
+    # Tambahkan kolom 'season'
+    df['season'] = df['month'].apply(get_season)
+    
+    # Penanganan missing values dengan interpolasi
+    numeric_columns = ['PM2.5', 'PM10', 'SO2', 'NO2', 'CO', 'O3', 'TEMP', 'PRES', 'DEWP', 'RAIN', 'WSPM']
+    for column in numeric_columns:
+        df[column] = df[column].interpolate(method='linear').fillna(method='ffill').fillna(method='bfill')
+    
     return df
 
-# Load data
+# Memuat data
 try:
     df = load_data()
 except Exception as e:
-    st.error(f"Error loading data: {str(e)}")
+    st.error(f"Error memuat data: {str(e)}")
     st.stop()
 
 # Sidebar
-st.sidebar.title("Air Quality Analysis")
+st.sidebar.title("Pengaturan Filter")
 
-# Date filter
-min_date = df['datetime'].min()
-max_date = df['datetime'].max()
-start_date = st.sidebar.date_input('Start Date', min_date)
-end_date = st.sidebar.date_input('End Date', max_date)
+# Tampilkan rentang waktu 
+min_date, max_date = df['datetime'].min().strftime('%Y-%m-%d'), df['datetime'].max().strftime('%Y-%m-%d')
+st.sidebar.write(f"Rentang Tanggal: {min_date} hingga {max_date}")
 
-# Station filter
-stations = sorted(df['station'].unique())
-selected_station = st.sidebar.selectbox('Select Station', stations)
+# Filter Stasiun
+stations = ['Semua Stasiun'] + sorted(df['station'].unique())  
+selected_station = st.sidebar.selectbox('Pilih Stasiun', stations)
 
-# Filter data
-mask = ((df['datetime'].dt.date >= start_date) & (df['datetime'].dt.date <= end_date) & (df['station'] == selected_station))
-filtered_df = df.loc[mask].copy()  # Use copy to avoid SettingWithCopyWarning
+# Filter Data
+filtered_df = df.copy()
+if selected_station != 'Semua Stasiun':
+    filtered_df = filtered_df[filtered_df['station'] == selected_station]
 
-# Main page
-st.title("Beijing Air Quality Analysis")
+# Halaman Utama
+st.title("Dashboard Analisis Kualitas Udara di Beijing")
 
-# Metrics
+# Statistik Utama 
 col1, col2, col3, col4 = st.columns(4)
-with col1:
-    avg_pm25 = filtered_df['PM2.5'].mean()
-    st.metric("Average PM2.5", f"{avg_pm25:.2f} μg/m³")
-with col2:
-    avg_pm10 = filtered_df['PM10'].mean()
-    st.metric("Average PM10", f"{avg_pm10:.2f} μg/m³")
-with col3:
-    avg_temp = filtered_df['TEMP'].mean()
-    st.metric("Average Temperature", f"{avg_temp:.1f} °C")
-with col4:
-    avg_humid = filtered_df['DEWP'].mean()
-    st.metric("Average Dew Point", f"{avg_humid:.1f} °C")
+col1.metric("Rata-rata PM2.5", f"{filtered_df['PM2.5'].mean():.2f} μg/m³")
+col2.metric("Rata-rata PM10", f"{filtered_df['PM10'].mean():.2f} μg/m³")
+col3.metric("Rata-rata Suhu", f"{filtered_df['TEMP'].mean():.2f} °C")
+col4.metric("Rata-rata Curah Hujan", f"{filtered_df['RAIN'].mean():.2f} mm")
 
-# Time series plot
-st.subheader("Pollutant Levels Over Time")
-pollutants = ['PM2.5', 'PM10', 'SO2', 'NO2', 'CO', 'O3']
-selected_pollutant = st.selectbox('Select Pollutant', pollutants)
+# **Pertanyaan 1: Pola Kualitas Udara**
+st.subheader("Pola Harian dan Musiman PM2.5")
+# Pola Harian
+fig_hourly = px.line(
+    filtered_df.groupby('hour')['PM2.5'].mean().reset_index(),
+    x='hour',
+    y='PM2.5',
+    title='Rata-rata PM2.5 per Jam',
+    labels={'hour': 'Jam', 'PM2.5': 'PM2.5 (µg/m³)'}
+)
+st.plotly_chart(fig_hourly, use_container_width=True)
 
-fig_time = px.line(filtered_df, 
-                   x='datetime', 
-                   y=selected_pollutant,
-                   title=f'{selected_pollutant} Levels at {selected_station}')
-st.plotly_chart(fig_time, use_container_width=True)
+# Pola Musiman/Bulanan PM2.5
+monthly_avg = filtered_df.groupby(['month', 'season'])['PM2.5'].mean().reset_index()
 
-# Seasonal analysis
-st.subheader("Seasonal Analysis")
-seasonal_avg = filtered_df.groupby('season')[pollutants].mean().reset_index()
-fig_season = px.bar(seasonal_avg,
-                    x='season',
-                    y=pollutants,
-                    title='Average Pollutant Levels by Season',
-                    barmode='group')
-st.plotly_chart(fig_season, use_container_width=True)
+fig_monthly = px.bar(
+    monthly_avg,
+    x='month',
+    y='PM2.5',
+    color='season',  # Warna berdasarkan musim
+    title='Rata-rata PM2.5 per Bulan (dengan Keterangan Musim)',
+    labels={'month': 'Bulan (1-12)', 'PM2.5': 'PM2.5 (µg/m³)', 'season': 'Musim'},
+    color_discrete_sequence=px.colors.qualitative.Set2,
+)
 
-# Comparison across stations
-st.subheader("Comparison of Average Pollutant Levels Across Stations")
+# Anotasi keterangan musim di bawah sumbu x
+fig_monthly.update_layout(
+    xaxis=dict(
+        tickmode='array',
+        tickvals=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        ticktext=[
+            "Jan (Winter)", "Feb (Winter)", "Mar (Spring)", "Apr (Spring)",
+            "May (Spring)", "Jun (Summer)", "Jul (Summer)", "Aug (Summer)",
+            "Sep (Fall)", "Oct (Fall)", "Nov (Fall)", "Dec (Winter)"
+        ]
+    )
+)
+st.plotly_chart(fig_monthly, use_container_width=True)
 
-# Load data rata-rata per stasiun
-station_avg = pd.read_csv('station_average.csv')
+# **Pertanyaan 2: Pengaruh Cuaca**
+# Hubungan PM2.5 dengan Kecepatan Angin
+fig_scatter_wspm = px.scatter(
+    filtered_df,
+    x='WSPM',
+    y='PM2.5',
+    title=f'Hubungan Kecepatan Angin dengan PM2.5 - {selected_station}',
+    labels={'WSPM': 'Kecepatan Angin (m/s)', 'PM2.5': 'PM2.5 (µg/m³)'},
+    opacity=0.5
+)
+st.plotly_chart(fig_scatter_wspm, use_container_width=True)
 
-# Pilih polutan untuk dibandingkan
-selected_pollutant_station = st.selectbox("Select Pollutant for Station Comparison", pollutants)
+# Hubungan PM2.5 dengan Curah Hujan
+fig_scatter_rain = px.scatter(
+    filtered_df,
+    x='RAIN',
+    y='PM2.5',
+    title='Hubungan Curah Hujan dengan PM2.5',
+    labels={'RAIN': 'Curah Hujan (mm)', 'PM2.5': 'PM2.5 (µg/m³)'}
+)
+st.plotly_chart(fig_scatter_rain, use_container_width=True)
 
-# Visualisasi perbandingan rata-rata antar stasiun
+# **Pertanyaan 3: Variasi Antar Stasiun**
+st.subheader("Rata-rata PM2.5 Antar Stasiun")
+if selected_station == 'Semua Stasiun':
+    station_avg = df.groupby('station')['PM2.5'].mean().reset_index()
+else:
+    station_avg = filtered_df.groupby('station')['PM2.5'].mean().reset_index()
+
 fig_station = px.bar(
     station_avg,
     x='station',
-    y=selected_pollutant_station,
-    title=f'Average {selected_pollutant_station} Levels Across Stations',
-    labels={'station': 'Station', selected_pollutant_station: f'{selected_pollutant_station} Concentration'},
-    color='station'
+    y='PM2.5',
+    title='Rata-rata PM2.5 Antar Stasiun',
+    labels={'station': 'Stasiun', 'PM2.5': 'PM2.5 (µg/m³)'},
+    color='station' if selected_station == 'Semua Stasiun' else None
 )
 st.plotly_chart(fig_station, use_container_width=True)
 
-
-# Wind direction analysis if 'wd' column exists
-if 'wd' in df.columns and 'WSPM' in df.columns:
-    st.subheader("Wind Direction Analysis")
-    wind_data = filtered_df.groupby('wd')['WSPM'].mean().reset_index()
-    fig_wind = go.Figure(go.Barpolar(
-        r=wind_data['WSPM'],
-        theta=wind_data['wd'],
-        name='Wind Speed (m/s)',
-        marker_color=wind_data['WSPM'],
-        marker_colorscale='Viridis'
-    ))
-    fig_wind.update_layout(title='Wind Rose Diagram')
-    st.plotly_chart(fig_wind, use_container_width=True)
-
-# Correlation heatmap
-st.subheader("Correlation Analysis")
-corr_matrix = filtered_df[pollutants].corr()
-fig_corr = px.imshow(corr_matrix,
-                     labels=dict(color="Correlation"),
-                     color_continuous_scale="RdBu")
+# **Pertanyaan 4: Korelasi Antar Polutan**
+st.subheader("Korelasi Antar Polutan")
+corr_matrix = filtered_df[['PM2.5', 'PM10', 'SO2', 'NO2', 'CO', 'O3']].corr()
+fig_corr = px.imshow(
+    corr_matrix,
+    title='Korelasi Antar Polutan',
+    labels=dict(color='Korelasi'),
+    color_continuous_scale='RdBu'
+)
 st.plotly_chart(fig_corr, use_container_width=True)
 
-# Display data table without index
-st.subheader("Raw Data")
-# Reset index and don't show it in the dataframe
-display_df = filtered_df.reset_index(drop=True)
-st.dataframe(display_df)
+# **Pertanyaan 5: Pengaruh Hujan**
+st.subheader("Distribusi PM2.5 Berdasarkan Curah Hujan")
+filtered_df['RAIN_CATEGORY'] = pd.cut(
+    filtered_df['RAIN'], 
+    bins=[0, 10, 20, 50, 100], 
+    labels=['0-10 mm', '10-20 mm', '20-50 mm', '50-100 mm']
+)
+fig_rain_box = px.box(
+    filtered_df,
+    x='RAIN_CATEGORY',
+    y='PM2.5',
+    title='Distribusi PM2.5 Berdasarkan Curah Hujan',
+    labels={'RAIN_CATEGORY': 'Curah Hujan (mm)', 'PM2.5': 'PM2.5 (µg/m³)'}
+)
+st.plotly_chart(fig_rain_box, use_container_width=True)
+
+# Menampilkan Data Mentah
+st.subheader("Data Mentah")
+st.dataframe(filtered_df)
