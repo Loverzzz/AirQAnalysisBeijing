@@ -14,7 +14,7 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     # Membaca file CSV
-    df = pd.read_csv('dashboard/dashboard.py')
+    df = pd.read_csv('main_data.csv')
     
     # Tambahkan kolom waktu dan musim
     df['datetime'] = pd.to_datetime(df[['year', 'month', 'day', 'hour']])
